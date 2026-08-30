@@ -1,0 +1,4 @@
+# Phase 0 intentionally has no LLM framework.
+pydantic>=2.7,<3
+python-dotenv>=1.0,<2
+pytest>=8,<9
