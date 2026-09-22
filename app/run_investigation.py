@@ -1,6 +1,8 @@
 from app.agents.investigation_agent import InvestigationAgent
 from app.orchestrator.orchestrator import Orchestrator
 from app.policies.investigation_policy import create_investigation_policy
+from app.review.human_review import HumanReviewGate
+from app.schemas.review import ReviewDecision, ReviewRequest
 from app.schemas.state import AgentState
 from app.schemas.task import AgentTask, AgentType
 from app.tools.git_log import GitLogTool
@@ -24,7 +26,6 @@ def main() -> None:
     state = AgentState(task=task)
 
     registry = ToolRegistry()
-
     registry.register(ReadFileTool())
     registry.register(SearchCodeTool())
     registry.register(GitLogTool())
@@ -42,19 +43,39 @@ def main() -> None:
         }
     )
 
+    # Agent performs the investigation.
     result = orchestrator.run(state)
 
-    print("\n=== INVESTIGATION RESULT ===")
+    print("\n=== AGENT RESULT ===")
     print(f"Success: {result.success}")
     print(f"Summary: {result.summary}")
 
-    print("\n=== FINDINGS ===")
-    for finding in result.findings:
-        print(f"- {finding}")
+    print("\n=== WORKFLOW STATE ===")
+    print(state.workflow_state.value)
 
-    print("\n=== EVIDENCE ===")
-    for evidence in result.evidence:
-        print(evidence)
+    # Human review.
+    review_request = ReviewRequest(
+        task_id=task.task_id,
+        decision=ReviewDecision.APPROVE,
+        reviewer="human",
+        comment="Investigation evidence reviewed.",
+    )
+
+    review_gate = HumanReviewGate()
+
+    review_gate.review(
+        state=state,
+        result=result,
+        request=review_request,
+    )
+
+    print("\n=== HUMAN REVIEW ===")
+    print(f"Decision: {review_request.decision.value}")
+    print(f"Reviewer: {review_request.reviewer}")
+    print(f"Comment: {review_request.comment}")
+
+    print("\n=== FINAL WORKFLOW STATE ===")
+    print(state.workflow_state.value)
 
 
 if __name__ == "__main__":

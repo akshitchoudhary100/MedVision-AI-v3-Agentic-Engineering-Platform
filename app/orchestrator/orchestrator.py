@@ -1,6 +1,6 @@
 from app.agents.base import BaseAgent
 from app.schemas.result import AgentResult
-from app.schemas.state import AgentState
+from app.schemas.state import AgentState, AgentStatus, WorkflowState
 from app.schemas.task import AgentType
 
 
@@ -20,4 +20,11 @@ class Orchestrator:
 
         agent = self.agents[agent_type]
 
-        return agent.run(state)
+        result = agent.run(state)
+
+        if result.success:
+            state.status = AgentStatus.WAITING
+            state.workflow_state = WorkflowState.WAITING_FOR_REVIEW
+            state.current_step = "Waiting for human review"
+
+        return result
