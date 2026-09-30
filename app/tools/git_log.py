@@ -10,6 +10,29 @@ class GitLogTool(BaseTool):
     name = "git_log"
     description = "Read recent Git commit history from a repository."
 
+    def definition(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_path": {
+                            "type": "string",
+                            "description": "Path to the Git repository.",
+                        },
+                        "max_commits": {
+                            "type": "integer",
+                            "description": "Maximum number of commits to return.",
+                        },
+                    },
+                    "required": ["repo_path"],
+                },
+            },
+        }
+
     def execute(
         self,
         repo_path: str,

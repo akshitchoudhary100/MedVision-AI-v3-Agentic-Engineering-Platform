@@ -10,6 +10,25 @@ class ReadFileTool(BaseTool):
     name = "read_file"
     description = "Read the contents of a text file."
 
+    def definition(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the text file.",
+                        }
+                    },
+                    "required": ["path"],
+                },
+            },
+        }
+
     def execute(self, path: str, **kwargs: Any) -> str:
         file_path = Path(path)
 

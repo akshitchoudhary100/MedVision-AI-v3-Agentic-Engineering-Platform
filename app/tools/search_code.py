@@ -53,3 +53,29 @@ class SearchCodeTool(BaseTool):
                 matches.append(str(file_path))
 
         return matches
+
+    def definition(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "root_path": {
+                            "type": "string",
+                            "description": "Repository directory to search.",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Text pattern to search for.",
+                        },
+                    },
+                    "required": [
+                        "root_path",
+                        "query",
+                    ],
+                },
+            },
+        }

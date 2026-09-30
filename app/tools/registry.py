@@ -27,3 +27,9 @@ class ToolRegistry:
     def execute(self, name: str, **kwargs: Any) -> Any:
         tool = self.get(name)
         return tool.execute(**kwargs)
+    
+    def definitions(self) -> list[dict[str, Any]]:
+        return [
+            tool.definition()
+            for tool in self._tools.values()
+        ]

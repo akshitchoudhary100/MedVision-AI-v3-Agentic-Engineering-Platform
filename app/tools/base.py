@@ -10,5 +10,10 @@ class BaseTool(ABC):
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> Any:
-        """Execute the tool with validated arguments."""
+        """Execute the tool."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def definition(self) -> dict[str, Any]:
+        """Return the tool schema exposed to the LLM."""
         raise NotImplementedError
