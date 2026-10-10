@@ -7,5 +7,6 @@ def create_investigation_policy() -> AgentPolicy:
             "read_file",
             "search_code",
             "git_log",
+            "read_symbol"
         }
     )

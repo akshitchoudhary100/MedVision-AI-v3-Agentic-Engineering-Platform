@@ -8,7 +8,12 @@ class ReadFileTool(BaseTool):
     """Read a text file from an allowed repository."""
 
     name = "read_file"
-    description = "Read the contents of a text file."
+    description = (
+    "Read an entire Python source file. "
+    "Use this only when multiple functions/classes from the same file "
+    "are relevant or file-level context is required. "
+    "Prefer read_symbol when only one symbol is needed."
+    )
 
     def definition(self) -> dict[str, Any]:
         return {

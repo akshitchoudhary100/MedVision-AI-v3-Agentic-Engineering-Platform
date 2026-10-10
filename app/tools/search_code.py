@@ -1,58 +1,32 @@
-from pathlib import Path
 from typing import Any
-
+from dataclasses import dataclass
 from app.tools.base import BaseTool
+from app.tools.code_index import CodeIndex
+from app.tools.search_code_ranked import format_for_llm, rank_files , RankedFile
+
+
+@dataclass
+class SearchResult:
+    ranked_files: list[RankedFile]
+
+    @property
+    def paths(self) -> list[str]:
+        return [item.path for item in self.ranked_files]
+
+    def as_text(self) -> str:
+        return format_for_llm(self.ranked_files)
 
 
 class SearchCodeTool(BaseTool):
-    """Search source files while ignoring generated directories."""
-
-    IGNORED_DIRECTORIES = {
-        ".git",
-        ".venv",
-        "venv",
-        "__pycache__",
-        ".pytest_cache",
-        "node_modules",
-    }
-
     name = "search_code"
-    description = "Search source files for a text pattern."
 
-    def execute(
-        self,
-        root_path: str,
-        query: str,
-        **kwargs: Any,
-    ) -> list[str]:
-        root = Path(root_path)
+    description = (
+        "Search a repository and return relevance-ranked source files "
+        "with reasons explaining why each file is relevant."
+    )
 
-        if not root.is_dir():
-            raise NotADirectoryError(
-                f"Directory not found: {root_path}"
-            )
-
-        matches: list[str] = []
-
-        for file_path in root.rglob("*"):
-            if not file_path.is_file():
-                continue
-
-            if any(
-                part in self.IGNORED_DIRECTORIES
-                for part in file_path.parts
-            ):
-                continue
-
-            try:
-                content = file_path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-
-            if query.lower() in content.lower():
-                matches.append(str(file_path))
-
-        return matches
+    def __init__(self, index: CodeIndex | None = None) -> None:
+        self.index = index
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -63,19 +37,49 @@ class SearchCodeTool(BaseTool):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "root_path": {
-                            "type": "string",
-                            "description": "Repository directory to search.",
-                        },
                         "query": {
                             "type": "string",
-                            "description": "Text pattern to search for.",
+                            "description": "Keyword or concept to search for.",
+                        },
+                        "root_path": {
+                            "type": "string",
+                            "description": "Repository root path.",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Maximum number of ranked files to return.",
+                            "default": 5,
                         },
                     },
-                    "required": [
-                        "root_path",
-                        "query",
-                    ],
+                    "required": ["query", "root_path"],
                 },
             },
         }
+
+    def execute(
+        self,
+        query: str,
+        root_path: str,
+        top_k: int = 5,
+        **kwargs: Any,
+    ) -> SearchResult:
+
+        if not query.strip():
+            raise ValueError("Search query cannot be empty.")
+
+        if self.index is None or self.index.root != root_path:
+            raise ValueError(
+                "Code index is not initialized for this repository."
+            )
+
+        ranked = rank_files(
+            index=self.index,
+            query=query,
+            root_path=root_path,
+            top_k=top_k,
+        )
+
+        if not ranked:
+           return SearchResult(ranked_files=[])
+
+        return SearchResult(ranked_files=ranked)

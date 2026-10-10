@@ -25,7 +25,7 @@ from app.schemas.task import (
 from app.tools.git_log import GitLogTool
 from app.tools.read_file import ReadFileTool
 from app.tools.registry import ToolRegistry
-from app.tools.search_code import SearchCodeTool
+from app.tools.search_code_ranked import SearchCodeTool
 
 
 V2_REPO = (
