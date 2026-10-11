@@ -14,9 +14,9 @@ Investigator = Callable[[str, str], tuple[Any, Any]]
 
 def _default_investigator(query: str, repo_path: str) -> tuple[Any, Any]:
     """Import the existing runtime lazily to avoid import-time side effects."""
-    from app.workflows.investigation_workflow import run_investigation
+    from app.workflows.langgraph_investigation_workflow import run_langgraph_investigation
 
-    return run_investigation(prompt=query, repo_path=repo_path)
+    return run_langgraph_investigation(prompt=query, repo_path=repo_path)
 
 
 def _investigate(
@@ -171,9 +171,8 @@ def build_investigation_graph(
 ):
     """Build the Phase 4.1 graph around the existing Ollama/plain-Python runtime.
 
-    This is an intentionally safe compatibility slice: the existing
-    ToolCallingAgent still owns its internal tool loop in Phase 4.1. The next
-    migration step will lift individual LLM/tool steps into graph nodes.
+    The investigation node now delegates to a per-step LangGraph agent loop.
+    The outer graph continues to own human review and revision routing.
     """
     runner = investigator or _default_investigator
 
