@@ -83,29 +83,90 @@ def _serialize_tool_result(result: Any) -> str:
 def _system_prompt(state: AgentLoopState) -> str:
     return f"""You are a software repository investigation agent.
 
-Task:
-{state.get('query', '')}
+    Task:
+    {state.get('query', '')}
 
-Repository:
-{state.get('repo_path', '')}
+    Repository:
+    {state.get('repo_path', '')}
 
-Available tools: search_code, read_symbol, read_file, git_log.
+    Available tools:
+    - search_code
+    - read_symbol
+    - read_file
+    - git_log
 
-Investigate the repository dynamically. Begin with search_code to discover relevant files.
-Use read_symbol for a specific function/class and read_file for broader file context.
-A search result is not evidence until its source is inspected with read_file or read_symbol.
-Never invent files, functions, variables, endpoints, configuration, or implementation details.
-Never repeat a search query. Make subsequent searches more specific based on what you learned.
-A final answer must be grounded in inspected source code. If evidence is insufficient, continue investigating.
+    Investigate the repository dynamically using source-code evidence.
 
-Runtime limits:
-- Maximum search calls: {state.get('max_search_calls', 3)}
-- Maximum distinct source files inspected: {state.get('max_source_files', 4)}
-- Minimum distinct source files required before final answer: {state.get('min_source_files', 2)}
-- Maximum LLM reasoning calls: {state.get('max_steps', 5)}
+    IMPORTANT INVESTIGATION BEHAVIOR:
 
-The runtime—not you—enforces tool permissions, budgets, repository path boundaries, and evidence requirements.
-Choose the next useful investigation action; do not assume a fixed tool sequence."""
+    Before choosing a tool, explicitly determine:
+
+    1. action_reason:
+    Why is this tool useful RIGHT NOW?
+    2. expected_information:
+    What specific information do you expect to obtain from this tool?
+    3. completion_criteria:
+    What evidence would make you confident that the investigation is complete?
+    4. missing_evidence:
+    What important evidence is still missing?
+
+    When calling a tool, put a concise JSON object containing these four fields
+    in the assistant message content.
+
+    Example:
+
+    {{
+    "action_reason": "I found the cache implementation but have not verified where it is used by inference.",
+    "expected_information": "How the inference path integrates Redis caching.",
+    "completion_criteria": "I can trace caching from the inference entry point to the Redis implementation.",
+    "missing_evidence": ["inference integration"]
+    }}
+
+    Keep this diagnostic metadata concise. Do NOT expose private chain-of-thought,
+    hidden reasoning, or long internal deliberation. Provide only the observable
+    engineering justification for the selected action.
+
+    A search result is not evidence until its source is inspected with
+    read_file or read_symbol.
+
+    Never invent files, functions, variables, endpoints, configuration,
+    or implementation details.
+
+    Never repeat a search query.
+
+    Make subsequent searches more specific based on what you learned.
+
+    After every tool observation, reconsider:
+    - what evidence has been obtained,
+    - what evidence is still missing,
+    - whether another tool is actually necessary,
+    - and whether the investigation now satisfies the completion criteria.
+
+    IMPORTANT:
+    Do not produce a final answer merely because you can write a plausible answer.
+
+    A final answer is valid only when:
+    - the answer is grounded in inspected source code,
+    - the required minimum source-file evidence has been inspected,
+    - the evidence actually supports the requested conclusion,
+    - and there is no important unresolved evidence gap.
+
+    If the runtime tells you that your final answer was rejected because
+    additional evidence is required, do NOT simply rewrite the same answer.
+    Identify the missing evidence and obtain genuinely new source evidence.
+
+    Runtime limits:
+    - Maximum search calls: {state.get('max_search_calls', 3)}
+    - Maximum distinct source files inspected: {state.get('max_source_files', 4)}
+    - Minimum distinct source files required before final answer: {state.get('min_source_files', 2)}
+    - Maximum LLM reasoning calls: {state.get('max_steps', 12)}
+
+    The runtime—not you—enforces tool permissions, budgets, repository path
+    boundaries, and evidence requirements.
+
+    Choose the next useful investigation action based on the current evidence.
+    Do not assume a fixed tool sequence.
+    """
 
 
 def _tool_feedback(
@@ -227,6 +288,21 @@ def _reason(state: AgentLoopState, *, llm: BaseLLM, tools: ToolRegistry) -> dict
     try:
         raw = llm.generate(messages=messages, tools=tools.definitions())
         response_type, call, answer, assistant_message = _parse_model_response(raw)
+
+        content = str(assistant_message.get("content") or "").strip()
+
+        next_step = current_step + 1
+
+        print("\n========== AGENT DECISION ==========")
+        print(f"STEP: {next_step}")
+        print(f"TYPE: {response_type}")
+        print(f"TOOL: {(call or {}).get('name')}")
+        print(f"ARGUMENTS: {(call or {}).get('arguments')}")
+        print(f"INSPECTED: {state.get('files_read', [])}")
+        print(f"ACTION METADATA: {content}")
+        print("====================================\n")
+
+        
     except Exception as exc:
         return {
             "status": "failed",
@@ -257,8 +333,16 @@ def _reason(state: AgentLoopState, *, llm: BaseLLM, tools: ToolRegistry) -> dict
         next_messages.append({
             "role": "user",
             "content": (
-                f"Final answer rejected: inspected {len(inspected)} distinct source file(s), "
-                f"but at least {minimum} are required. Continue investigating using search_code, read_symbol, or read_file."
+                "RUNTIME VALIDATION RESULT:\n"
+                "Your proposed final answer was rejected.\n\n"
+                f"Inspected source files: {len(inspected)}\n"
+                f"Required source files: {minimum}\n"
+                f"Already inspected: {sorted(inspected)}\n\n"
+                "You are NOT finished.\n"
+                "Identify the missing evidence required to support your answer.\n"
+                "Then choose a tool that obtains genuinely new evidence.\n"
+                "Do not repeat the previous answer.\n"
+                "Do not repeat a search unless the query is materially more specific."
             ),
         })
         return {"status": "running", "step_count": next_step, "messages": next_messages}
@@ -440,6 +524,13 @@ def _observe(state: AgentLoopState) -> dict[str, Any]:
     succeeded = bool(state.get("last_tool_succeeded", False))
     messages = list(state.get("messages", []))
     messages.append({"role": "tool", "tool_name": name or "unknown", "content": result_text})
+
+    print("\n========== TOOL OBSERVATION ==========")
+    print(f"TOOL: {name}")
+    print(f"SUCCESS: {succeeded}")
+    print(f"RESULT: {result_text[:1500]}")
+    print(f"INSPECTED BEFORE: {state.get('files_read', [])}")
+    print("======================================\n")
 
     discovered = list(state.get("files_seen_in_search", []))
     for path in state.get("last_search_paths", []):

@@ -47,7 +47,7 @@ def run_langgraph_investigation(
             llm=llm,
             tools=registry,
             policy=policy,
-            max_steps=5,
+            max_steps=12,
         )
 
         agent_state.current_step = f"langgraph_reason_step_{loop_state.get('step_count', 0)}"

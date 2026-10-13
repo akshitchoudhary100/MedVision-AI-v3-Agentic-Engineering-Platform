@@ -38,7 +38,7 @@ def _investigate(
             "errors": [*state.get("errors", []), "A repository path is required."],
         }
 
-    feedback = state.get("review_feedback", "").strip()
+    feedback = str(state.get("review_feedback") or "").strip()
     effective_query = query
     if feedback:
         effective_query = (
@@ -104,8 +104,7 @@ def _human_review(state: InvestigationGraphState) -> dict[str, Any]:
         }
 
     choice = decision.get("decision")
-    feedback = str(decision.get("feedback", "")).strip()
-
+    feedback = str(decision.get("feedback") or "").strip()
     if choice == "approve":
         return {
             "review_decision": "approve",
