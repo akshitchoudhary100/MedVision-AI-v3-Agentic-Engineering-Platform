@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from uuid import uuid4
 import json
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -110,21 +110,17 @@ def _system_prompt(state: AgentLoopState) -> str:
     4. missing_evidence:
     What important evidence is still missing?
 
-    When calling a tool, put a concise JSON object containing these four fields
-    in the assistant message content.
+    TOOL CALL CONTRACT:
 
-    Example:
+    When calling a tool, follow that tool's supplied JSON schema exactly.
 
-    {{
-    "action_reason": "I found the cache implementation but have not verified where it is used by inference.",
-    "expected_information": "How the inference path integrates Redis caching.",
-    "completion_criteria": "I can trace caching from the inference entry point to the Redis implementation.",
-    "missing_evidence": ["inference integration"]
-    }}
-
-    Keep this diagnostic metadata concise. Do NOT expose private chain-of-thought,
-    hidden reasoning, or long internal deliberation. Provide only the observable
-    engineering justification for the selected action.
+    - search_code requires query and root_path.
+    - read_file requires path.
+    - read_symbol requires file, symbol_name, and root_path.
+    - Do not put diagnostic metadata or explanations inside tool arguments.
+    - Include every required argument with the correct name and type.
+    - Do not invent or reconstruct the repository root. Use the supplied
+      repository context and repository-relative paths where requested.
 
     A search result is not evidence until its source is inspected with
     read_file or read_symbol.
@@ -192,39 +188,95 @@ def _tool_feedback(
     return update
 
 
-def _parse_model_response(raw: Any) -> tuple[str, dict[str, Any] | None, str, dict[str, Any]]:
-    if not isinstance(raw, dict):
-        raise ValueError("Invalid Ollama response: expected an object.")
-    message = raw.get("message", {})
-    if not isinstance(message, dict):
-        raise ValueError("Invalid Ollama response: 'message' must be an object.")
-    tool_calls = message.get("tool_calls") or []
-    if tool_calls:
-        first = tool_calls[0]
-        if not isinstance(first, dict) or not isinstance(first.get("function"), dict):
-            raise ValueError("Invalid Ollama tool call structure.")
-        function = first["function"]
-        name = function.get("name")
-        arguments = function.get("arguments", {})
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("Ollama returned a tool call without a function name.")
-        if not isinstance(arguments, dict):
-            raise ValueError(f"Invalid arguments for tool '{name}'. Expected an object.")
-        # We execute one call per graph cycle. Preserve only that call in the
-        # conversation so Ollama doesn't see unmatched sibling tool calls.
-        assistant_message: dict[str, Any] = {"role": "assistant", "content": message.get("content", "")}
+def _parse_model_response(
+        raw: Any,
+    ) -> tuple[str, dict[str, Any] | None, str, dict[str, Any]]:
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid LLM response: expected an object.")
+
+        message = raw.get("message", {})
+        if not isinstance(message, dict):
+            raise ValueError("Invalid LLM response: 'message' must be an object.")
+
+        tool_calls = message.get("tool_calls") or []
+
+        if tool_calls:
+            first = tool_calls[0]
+
+            if not isinstance(first, dict) or not isinstance(
+                first.get("function"), dict
+            ):
+                raise ValueError("Invalid tool-call structure.")
+
+            function = first["function"]
+            name = function.get("name")
+            raw_arguments = function.get("arguments", {})
+
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Tool call has no valid function name.")
+
+            if isinstance(raw_arguments, str):
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Tool arguments for {name!r} are invalid JSON."
+                    ) from exc
+            else:
+                arguments = raw_arguments
+
+            if not isinstance(arguments, dict):
+                raise ValueError(
+                    f"Tool arguments for {name!r} must be a JSON object."
+                )
+
+            # Ollama responses may not include an ID. The internal protocol
+            # always supplies one, and each resulting tool message reuses it.
+            call_id = first.get("id") or f"local_{uuid4().hex}"
+
+            normalized_call = {
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": arguments,
+                },
+            }
+
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": message.get("content") or "",
+                "tool_calls": [normalized_call],
+            }
+
+            if message.get("thinking"):
+                assistant_message["thinking"] = message["thinking"]
+
+            return (
+                "tool_call",
+                {
+                    "id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                },
+                "",
+                assistant_message,
+            )
+
+        content = message.get("content", "")
+
+        if not isinstance(content, str):
+            raise ValueError("LLM returned a non-text final answer.")
+
+        assistant_message = {
+            "role": "assistant",
+            "content": content,
+        }
+
         if message.get("thinking"):
             assistant_message["thinking"] = message["thinking"]
-        assistant_message["tool_calls"] = [first]
-        return "tool_call", {"name": name, "arguments": arguments}, "", assistant_message
 
-    content = message.get("content", "")
-    if not isinstance(content, str):
-        raise ValueError("Ollama returned a non-text final answer.")
-    assistant_message = {"role": "assistant", "content": content}
-    if message.get("thinking"):
-        assistant_message["thinking"] = message["thinking"]
-    return "final", None, content.strip(), assistant_message
+        return "final", None, content.strip(), assistant_message
 
 
 def _initialize(
@@ -522,8 +574,22 @@ def _observe(state: AgentLoopState) -> dict[str, Any]:
         name = str(call.get("name", "unknown"))
     result_text = str(state.get("last_tool_result", ""))
     succeeded = bool(state.get("last_tool_succeeded", False))
+    
     messages = list(state.get("messages", []))
-    messages.append({"role": "tool", "tool_name": name or "unknown", "content": result_text})
+
+    tool_message: dict[str, Any] = {
+        "role": "tool",
+        "tool_name": name or "unknown",
+        "content": result_text,
+    }
+
+    tool_call_id = call.get("id")
+
+    if tool_call_id:
+        tool_message["tool_call_id"] = tool_call_id
+        tool_message["name"] = name or "unknown"
+
+    messages.append(tool_message)
 
     print("\n========== TOOL OBSERVATION ==========")
     print(f"TOOL: {name}")

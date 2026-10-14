@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.llm.ollama_llm import OllamaLLM
+from app.llm.factory import create_llm_from_env
 from app.orchestrator.langgraph_agent_loop import run_agent_loop
 from app.policies.investigation_policy import create_investigation_policy
 from app.schemas.result import AgentResult
@@ -39,8 +39,8 @@ def run_langgraph_investigation(
 
         policy = create_investigation_policy()
         # Keep the Phase 3 provider interface and chosen model unchanged.
-        llm = OllamaLLM(model="granite4:3b")
-
+        llm = create_llm_from_env()
+    
         loop_state = run_agent_loop(
             query=prompt,
             repo_path=repo_path,

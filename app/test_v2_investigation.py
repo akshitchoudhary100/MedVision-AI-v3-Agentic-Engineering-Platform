@@ -28,15 +28,6 @@ Do not assume or invent implementation details.
 Before considering the investigation complete, make sure the relevant
 implementation and its integration into the inference path are supported
 by inspected source files.
-
-When choosing each tool, provide concise structured investigation metadata:
-- action_reason: why this tool is needed now
-- expected_information: what this tool should reveal
-- completion_criteria: what evidence would indicate the investigation is complete
-- missing_evidence: what important evidence is still missing
-
-Do not provide private chain-of-thought. Only provide concise engineering
-justification for the selected action.
 """.strip()
 
 print("=" * 70)

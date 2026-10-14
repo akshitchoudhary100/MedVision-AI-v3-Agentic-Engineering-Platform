@@ -8,7 +8,7 @@ class BaseLLM(ABC):
     @abstractmethod
     def generate(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> Any:
         """Generate a model response."""
